@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { supabase, loadUserPoints, saveUserPoints, saveTransaction, createProfile } from './supabase'
 
 const THEMES = {
   1: { accent: "#FF3D00", bg: "linear-gradient(135deg,#1A0800,#2A1200)", light: "rgba(255,61,0,0.12)" },
@@ -51,7 +52,7 @@ const BADGES = [
 function getTier(p) { return TIERS.find(t => p >= t.min && p <= t.max) || TIERS[0]; }
 
 function generateQR(userId, shopId) {
-  return `FID-${userId}-${shopId}-${Date.now().toString(36).toUpperCase()}`;
+  return `FID-${userId}-${shopId}`;
 }
 
 // Simple QR visual component
@@ -128,6 +129,32 @@ export default function App() {
   const [adminShops, setAdminShops] = useState(JSON.parse(JSON.stringify(INIT_SHOPS)));
   const [showRewardForm, setShowRewardForm] = useState(false);
   const [newReward, setNewReward] = useState({ type: "fixed", name: "", points: 100, emoji: "🎁", desc: "", value: 10 });
+  useEffect(() => {
+  if (!currentUser) return;
+  const refreshPoints = async () => {
+    const pointsData = await loadUserPoints(currentUser.id);
+    if (!pointsData) return;
+    const shopData = {
+      1: { points: 0, redeemedRewards: [], history: [] },
+      2: { points: 0, redeemedRewards: [], history: [] },
+      3: { points: 0, redeemedRewards: [], history: [] }
+    };
+    let totalPoints = 0;
+    let totalVisits = 0;
+    let totalSpent = 0;
+    pointsData.forEach(row => {
+      shopData[row.shop_id] = { points: row.points, redeemedRewards: [], history: [] };
+      totalPoints += row.points;
+      totalVisits += row.total_visits || 0;
+      totalSpent += row.total_spent || 0;
+    });
+    setCurrentUser(prev => ({...prev, shopData, totalPoints, totalVisits, totalSpent}));
+  };
+  refreshPoints();
+  // Rafraîchir toutes les 10 secondes
+  const interval = setInterval(refreshPoints, 10000);
+  return () => clearInterval(interval);
+}, [currentUser?.id]);
 
   const shop = shops.find(s => s.id === activeShopId);
   const adminShop = adminShops.find(s => s.id === adminShopId);
@@ -144,80 +171,199 @@ export default function App() {
     setTimeout(() => setNotif(null), 2800);
   };
 
-  const doLogin = () => {
-    const u = users.find(u => u.email === form.email);
-    if (!u) { showNotif("Email introuvable", "error"); return; }
-    setCurrentUser(u);
-    showNotif("Bienvenue " + u.name + " !");
+const doLogin = async () => {
+  if(!form.email||!form.pwd){showNotif('Remplissez tous les champs','error');return;}
+  const {data, error} = await supabase.auth.signInWithPassword({
+    email: form.email,
+    password: form.pwd
+  });
+  if(error){showNotif('Email ou mot de passe incorrect','error');return;}
+  
+  // Charger les points depuis Supabase
+  const pointsData = await loadUserPoints(data.user.id);
+  
+  // Construire le shopData depuis la base
+  const shopData = {
+    1: { points: 0, redeemedRewards: [], history: [] },
+    2: { points: 0, redeemedRewards: [], history: [] },
+    3: { points: 0, redeemedRewards: [], history: [] }
   };
+  
+  let totalPoints = 0;
+  let totalVisits = 0;
+  let totalSpent = 0;
+  
+  if(pointsData) {
+    pointsData.forEach(row => {
+      shopData[row.shop_id] = {
+        points: row.points,
+        redeemedRewards: [],
+        history: []
+      };
+      totalPoints += row.points;
+      totalVisits += row.total_visits || 0;
+      totalSpent += row.total_spent || 0;
+    });
+  }
+  
+  setCurrentUser({
+    name: data.user.user_metadata?.name || data.user.email.split('@')[0],
+    email: data.user.email,
+    id: data.user.id,
+    totalPoints,
+    totalSpent,
+    totalVisits,
+    shopData
+  });
+  showNotif('Bienvenue !');
+};
 
-  const doRegister = () => {
-    if (!form.name || !form.regEmail || !form.regPwd) { showNotif("Remplissez tout", "error"); return; }
-    if (form.regPwd.length < 6) { showNotif("Mot de passe trop court", "error"); return; }
-    const newUser = {
-      id: "U" + Date.now().toString().slice(-4),
-      name: form.name, email: form.regEmail,
-      totalPoints: 0, totalSpent: 0, totalVisits: 0,
-      shopData: { 1: { points: 0, redeemedRewards: [], history: [] }, 2: { points: 0, redeemedRewards: [], history: [] }, 3: { points: 0, redeemedRewards: [], history: [] } }
-    };
-    setUsers(prev => [...prev, newUser]);
-    setCurrentUser(newUser);
-    showNotif("Compte créé !");
-  };
+ const doRegister = async () => {
+  if(!form.name||!form.regEmail||!form.regPwd){showNotif('Remplissez tout','error');return;}
+  if(form.regPwd.length<6){showNotif('Mot de passe trop court','error');return;}
+  const {data, error} = await supabase.auth.signUp({
+    email: form.regEmail,
+    password: form.regPwd,
+    options: { data: { name: form.name } }
+  });
+  if(error){showNotif(error.message,'error');return;}
+  
+  // Créer le profil dans Supabase
+  await createProfile(data.user.id, form.name, form.regEmail);
+  
+  setCurrentUser({
+    name: form.name,
+    email: form.regEmail,
+    id: data.user.id,
+    totalPoints: 0,
+    totalSpent: 0,
+    totalVisits: 0,
+    shopData: {
+      1: { points: 0, redeemedRewards: [], history: [] },
+      2: { points: 0, redeemedRewards: [], history: [] },
+      3: { points: 0, redeemedRewards: [], history: [] }
+    }
+  });
+  showNotif('Compte créé !');
+};
 
   // Caissier scan QR
-  const cashierScan = () => {
-    const parts = cashierInput.split("-");
-    if (parts.length < 3) { showNotif("QR invalide", "error"); return; }
-    const userId = parts[1];
-    const u = users.find(u => u.id === userId);
-    if (!u) { showNotif("Client introuvable", "error"); return; }
-    setCashierFoundUser(u);
+  const cashierScan = async () => {
+  const parts = cashierInput.split("-");
+  if (parts.length < 3) { showNotif("QR invalide", "error"); return; }
+  
+  // Récupérer l'ID depuis le QR (format: FID-userId-shopId)
+  const userId = parts.slice(1, -1).join("-");
+  const shopIdFromQR = parseInt(parts[parts.length - 1]);
+  
+  // Chercher dans Supabase
+  const { data, error } = await supabase.auth.admin.getUserById(userId);
+  
+  if (error || !data) {
+    // Chercher dans les profils
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+      
+    if (profileError || !profile) { showNotif("Client introuvable", "error"); return; }
+    
+    // Charger ses points
+    const pointsData = await loadUserPoints(userId);
+    const shopData = {
+      1: { points: 0, redeemedRewards: [], history: [] },
+      2: { points: 0, redeemedRewards: [], history: [] },
+      3: { points: 0, redeemedRewards: [], history: [] }
+    };
+    if (pointsData) {
+      pointsData.forEach(row => {
+        shopData[row.shop_id] = { points: row.points, redeemedRewards: [], history: [] };
+      });
+    }
+    
+    setCashierFoundUser({ 
+      id: userId, 
+      name: profile.name, 
+      email: profile.email,
+      totalVisits: 0,
+      shopData
+    });
     setCashierStep("amount");
-  };
+    return;
+  }
+};
 
-  const cashierAddPoints = () => {
-    const amount = parseFloat(cashierAmount);
-    if (!amount || amount <= 0) { showNotif("Montant invalide", "error"); return; }
-    const sh = adminShops.find(s => s.id === adminShopId);
-    const pts = Math.round(amount * sh.pointsPerEuro);
-    setUsers(prev => prev.map(u => {
-      if (u.id !== cashierFoundUser.id) return u;
-      const updated = { ...u };
-      updated.totalPoints += pts;
-      updated.totalSpent += amount;
-      updated.totalVisits += 1;
-      updated.shopData = { ...updated.shopData };
-      updated.shopData[adminShopId] = {
-        ...updated.shopData[adminShopId],
-        points: (updated.shopData[adminShopId]?.points || 0) + pts,
-        history: [{ date: new Date().toLocaleDateString("fr"), amount, pts }, ...(updated.shopData[adminShopId]?.history || [])],
-      };
-      if (updated.id === currentUser?.id) setCurrentUser(updated);
-      return updated;
-    }));
-    showNotif(`✅ +${pts} pts ajoutés à ${cashierFoundUser.name} !`);
-    setCashierStep("done");
-    setCashierAmount("");
-  };
+  const cashierAddPoints = async () => {
+  const amount = parseFloat(cashierAmount);
+  if (!amount || amount <= 0) { showNotif("Montant invalide", "error"); return; }
+  const sh = adminShops.find(s => s.id === adminShopId);
+  const pts = Math.round(amount * sh.pointsPerEuro);
+  
+  // Récupérer les points actuels du client
+  const currentShopData = cashierFoundUser.shopData?.[adminShopId] || { points: 0, total_visits: 0, total_spent: 0 };
+  const newPoints = (currentShopData.points || 0) + pts;
+  const newVisits = (cashierFoundUser.totalVisits || 0) + 1;
+  const newSpent = (cashierFoundUser.totalSpent || 0) + amount;
 
-  const redeemReward = (rewardId) => {
-    const r = adminShops.find(s => s.id === activeShopId)?.rewards.find(r => r.id === rewardId);
-    if (!r) return;
-    if (userShopData.points < r.points) { showNotif("Pas assez de points !", "error"); return; }
-    setUsers(prev => prev.map(u => {
-      if (u.id !== currentUser.id) return u;
-      const updated = { ...u, shopData: { ...u.shopData } };
-      updated.shopData[activeShopId] = {
-        ...updated.shopData[activeShopId],
-        points: updated.shopData[activeShopId].points - r.points,
-        redeemedRewards: [...(updated.shopData[activeShopId].redeemedRewards || []), { rewardId, date: new Date().toLocaleDateString("fr") }],
-      };
-      setCurrentUser(updated);
-      return updated;
-    }));
-    showNotif("🎉 " + r.name + " débloqué !");
-  };
+  // Sauvegarder dans Supabase
+  await saveUserPoints(cashierFoundUser.id, adminShopId, newPoints, newSpent, newVisits);
+  await saveTransaction(cashierFoundUser.id, adminShopId, amount, pts);
+
+  // Mettre à jour l'état local
+  setUsers(prev => prev.map(u => {
+    if (u.id !== cashierFoundUser.id) return u;
+    const updated = { ...u };
+    updated.totalPoints = (updated.totalPoints || 0) + pts;
+    updated.totalSpent = newSpent;
+    updated.totalVisits = newVisits;
+    updated.shopData = { ...updated.shopData };
+    updated.shopData[adminShopId] = {
+      points: newPoints,
+      redeemedRewards: updated.shopData?.[adminShopId]?.redeemedRewards || [],
+      history: [{ date: new Date().toLocaleDateString("fr"), amount, pts }, ...(updated.shopData?.[adminShopId]?.history || [])],
+    };
+    if (updated.id === currentUser?.id) setCurrentUser(updated);
+    return updated;
+  }));
+  
+  showNotif(`✅ +${pts} pts ajoutés à ${cashierFoundUser.name} !`);
+  setCashierStep("done");
+  setCashierAmount("");
+};
+
+ const redeemReward = async (rewardId) => {
+  const r = adminShops.find(s => s.id === activeShopId)?.rewards.find(r => r.id === rewardId);
+  if (!r) return;
+  if (userShopData.points < r.points) { showNotif("Pas assez de points !", "error"); return; }
+  
+  const newPoints = userShopData.points - r.points;
+  
+  // Sauvegarder dans Supabase
+  await saveUserPoints(
+    currentUser.id,
+    activeShopId,
+    newPoints,
+    currentUser.totalSpent || 0,
+    currentUser.totalVisits || 0
+  );
+
+  // Mettre à jour l'état local
+  setUsers(prev => prev.map(u => {
+    if (u.id !== currentUser.id) return u;
+    const updated = { ...u, shopData: { ...u.shopData } };
+    updated.shopData[activeShopId] = {
+      ...updated.shopData[activeShopId],
+      points: newPoints,
+      redeemedRewards: [...(updated.shopData[activeShopId].redeemedRewards || []), { rewardId, date: new Date().toLocaleDateString("fr") }],
+    };
+    updated.totalPoints = (updated.totalPoints || 0) - r.points;
+    setCurrentUser(updated);
+    return updated;
+  }));
+  
+  showNotif("🎉 " + r.name + " débloqué !");
+};
 
   const s = (prop) => ({ style: prop });
 
@@ -441,7 +587,7 @@ export default function App() {
             <QRCode value={qrValue} size={200} color={theme.accent} />
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase" }}>Votre code</div>
-              <div style={{ fontSize: 13, fontFamily: "'Space Mono',monospace", color: "#333", marginTop: 4 }}>{qrValue.slice(0, 20)}...</div>
+              <div style={{ fontSize: 10, fontFamily: "'Space Mono',monospace", color: "#333", marginTop: 4, wordBreak: "break-all", textAlign: "center" }}>{qrValue}</div>
             </div>
           </div>
 
