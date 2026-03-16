@@ -642,7 +642,16 @@ const doLogin = async () => {
               <div style={{ background: "#0F0F14", borderRadius: 12, padding: 14 }}><div style={{ fontSize: 22, fontWeight: 800 }}>{currentUser.totalPoints}</div><div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: 1 }}>Pts cumulés</div></div>
               <div style={{ background: "#0F0F14", borderRadius: 12, padding: 14 }}><div style={{ fontSize: 22, fontWeight: 800 }}>{currentUser.totalVisits}</div><div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: 1 }}>Visites</div></div>
             </div>
-            <button onClick={() => { setCurrentUser(null); setView("card"); }} style={{ width: "100%", padding: 13, background: "none", border: "1px solid rgba(255,255,255,0.06)", color: "#666", fontFamily: "'Outfit',sans-serif", fontSize: 14, fontWeight: 600, borderRadius: 14, cursor: "pointer", marginTop: 12, transition: "all .2s" }}>Se déconnecter</button>
+           <button
+  onClick={async () => {
+    await supabase.auth.signOut();
+    setCurrentUser(null);
+    setView("card");
+  }}
+  style={{ width: "100%", padding: 13, background: "none", border: "1px solid rgba(255,255,255,0.06)", color: "#666", fontFamily: "'Outfit',sans-serif", fontSize: 14, fontWeight: 600, borderRadius: 14, cursor: "pointer", marginTop: 12 }}
+>
+  Se déconnecter
+</button>
           </div>
 
           <div style={{ fontSize: 11, fontWeight: 700, color: "#555", letterSpacing: 2, textTransform: "uppercase", margin: "20px 0 10px" }}>Mes boutiques</div>
