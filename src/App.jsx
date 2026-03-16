@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase, loadUserPoints, saveUserPoints, saveTransaction, createProfile } from './supabase'
+import { QRCodeSVG } from 'qrcode.react'
 
 const THEMES = {
   1: { accent: "#FF3D00", bg: "linear-gradient(135deg,#1A0800,#2A1200)", light: "rgba(255,61,0,0.12)" },
@@ -55,58 +56,6 @@ function generateQR(userId, shopId) {
   return `FID-${userId}-${shopId}`;
 }
 
-// Simple QR visual component
-function QRCode({ value, size = 160, color = "#FF3D00" }) {
-  const canvasRef = useRef(null);
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const s = size;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, s, s);
-    // Generate pseudo-QR pattern from string hash
-    const hash = value.split("").reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0);
-    const grid = 21;
-    const cell = Math.floor(s / grid);
-    const pad = (s - cell * grid) / 2;
-    // Finder patterns
-    const drawFinder = (ox, oy) => {
-      ctx.fillStyle = "#1a1a1a";
-      ctx.fillRect(pad + ox * cell, pad + oy * cell, cell * 7, cell * 7);
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(pad + (ox + 1) * cell, pad + (oy + 1) * cell, cell * 5, cell * 5);
-      ctx.fillStyle = "#1a1a1a";
-      ctx.fillRect(pad + (ox + 2) * cell, pad + (oy + 2) * cell, cell * 3, cell * 3);
-    };
-    drawFinder(0, 0); drawFinder(14, 0); drawFinder(0, 14);
-    // Data modules
-    for (let row = 0; row < grid; row++) {
-      for (let col = 0; col < grid; col++) {
-        const inFinder = (row < 9 && col < 9) || (row < 9 && col > 11) || (row > 11 && col < 9);
-        if (!inFinder) {
-          const bit = (hash >> ((row * grid + col) % 32)) & 1;
-          const noise = Math.sin(row * 7.3 + col * 3.1 + hash) > 0 ? 1 : 0;
-          if (bit ^ noise) {
-            ctx.fillStyle = "#1a1a1a";
-            ctx.fillRect(pad + col * cell, pad + row * cell, cell - 0.5, cell - 0.5);
-          }
-        }
-      }
-    }
-    // Center logo
-    const cx = s / 2, cy = s / 2, r = cell * 2.5;
-    ctx.fillStyle = "#fff";
-    ctx.beginPath(); ctx.arc(cx, cy, r + 2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#fff";
-    ctx.font = `bold ${cell * 1.8}px sans-serif`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("F", cx, cy);
-  }, [value, size, color]);
-  return <canvas ref={canvasRef} width={size} height={size} style={{ borderRadius: 12 }} />;
-}
 
 export default function App() {
   const [shops] = useState(INIT_SHOPS);
@@ -584,7 +533,7 @@ const doLogin = async () => {
           <div style={{ fontSize: 13, color: "#666", marginTop: 4, textAlign: "center" }}>Présentez-le au caissier pour gagner des points</div>
 
           <div style={{ marginTop: 32, background: "#fff", borderRadius: 24, padding: 24, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-            <QRCode value={qrValue} size={200} color={theme.accent} />
+            <QRCodeSVG value={qrValue} size={200} bgColor="#ffffff" fgColor="#000000" level="H" />
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase" }}>Votre code</div>
               <div style={{ fontSize: 10, fontFamily: "'Space Mono',monospace", color: "#333", marginTop: 4, wordBreak: "break-all", textAlign: "center" }}>{qrValue}</div>
