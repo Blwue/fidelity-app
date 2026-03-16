@@ -59,14 +59,12 @@ function generateQR(userId, shopId) {
 
 export default function App() {
   const [shops] = useState(INIT_SHOPS);
-  const [users, setUsers] = useState([
-    { id: "U001", name: "Marie", email: "marie@demo.fr", totalPoints: 320, totalSpent: 320, totalVisits: 8, shopData: { 1: { points: 320, redeemedRewards: [], history: [] }, 2: { points: 180, redeemedRewards: [], history: [] }, 3: { points: 0, redeemedRewards: [], history: [] } } },
-  ]);
+  const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [activeShopId, setActiveShopId] = useState(1);
   const [view, setView] = useState("card");
   const [authTab, setAuthTab] = useState("login");
-  const [form, setForm] = useState({ email: "marie@demo.fr", pwd: "demo123", name: "", regEmail: "", regPwd: "" });
+  const [form, setForm] = useState({ email: "", pwd: "", name: "", regEmail: "", regPwd: "" });
   const [notif, setNotif] = useState(null);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [cashierMode, setCashierMode] = useState(false);
@@ -78,33 +76,77 @@ export default function App() {
   const [adminShops, setAdminShops] = useState(JSON.parse(JSON.stringify(INIT_SHOPS)));
   const [showRewardForm, setShowRewardForm] = useState(false);
   const [newReward, setNewReward] = useState({ type: "fixed", name: "", points: 100, emoji: "🎁", desc: "", value: 10 });
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
-  if (!currentUser) return;
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (session) {
+      supabase.auth.getUser().then(async ({ data: { user } }) => {
+        const pointsData = await loadUserPoints(user.id);
+        const shopData = {
+          1: { points: 0, redeemedRewards: [], history: [] },
+          2: { points: 0, redeemedRewards: [], history: [] },
+          3: { points: 0, redeemedRewards: [], history: [] }
+        };
+        let totalPoints = 0, totalVisits = 0, totalSpent = 0;
+        if (pointsData) {
+          pointsData.forEach(row => {
+            shopData[row.shop_id] = { points: row.points, redeemedRewards: [], history: [] };
+            totalPoints += row.points;
+            totalVisits += row.total_visits || 0;
+            totalSpent += row.total_spent || 0;
+          });
+        }
+        setCurrentUser({
+          name: user.user_metadata?.name || user.email.split('@')[0],
+          email: user.email,
+          id: user.id,
+          totalPoints, totalSpent, totalVisits, shopData
+        });
+        setLoading(false);
+      });
+    } else {
+      setLoading(false);
+    }
+  });
+}, []);
+useEffect(() => {
+  if (!currentUser?.id) return;
+
   const refreshPoints = async () => {
     const pointsData = await loadUserPoints(currentUser.id);
     if (!pointsData) return;
+
     const shopData = {
       1: { points: 0, redeemedRewards: [], history: [] },
       2: { points: 0, redeemedRewards: [], history: [] },
       3: { points: 0, redeemedRewards: [], history: [] }
     };
+
     let totalPoints = 0;
     let totalVisits = 0;
     let totalSpent = 0;
+
     pointsData.forEach(row => {
       shopData[row.shop_id] = { points: row.points, redeemedRewards: [], history: [] };
       totalPoints += row.points;
       totalVisits += row.total_visits || 0;
       totalSpent += row.total_spent || 0;
     });
-    setCurrentUser(prev => ({...prev, shopData, totalPoints, totalVisits, totalSpent}));
+
+    setCurrentUser(prev => ({
+      ...prev,
+      shopData,
+      totalPoints,
+      totalVisits,
+      totalSpent
+    }));
   };
+
   refreshPoints();
-  // Rafraîchir toutes les 10 secondes
   const interval = setInterval(refreshPoints, 10000);
+
   return () => clearInterval(interval);
 }, [currentUser?.id]);
-
   const shop = shops.find(s => s.id === activeShopId);
   const adminShop = adminShops.find(s => s.id === adminShopId);
   const theme = THEMES[activeShopId] || THEMES[1];
@@ -329,7 +371,7 @@ const doLogin = async () => {
       </div>
       {authTab === "login" ? (
         <>
-          {[["Email", "email", "email", "marie@demo.fr"], ["Mot de passe", "password", "pwd", ""]].map(([label, type, key, ph]) => (
+          {[["Email", "email", "email", ""], ["Mot de passe", "", "pwd", ""]].map(([label, type, key, ph]) => (
             <div key={key} style={{ marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 11, color: "#888", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 8, fontWeight: 500 }}>{label}</label>
               <input type={type} value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} placeholder={ph} style={{ width: "100%", background: "#16161D", border: "1px solid rgba(255,255,255,0.06)", color: "#F2F2F2", padding: "14px 16px", borderRadius: 14, fontSize: 15, outline: "none" }} />
